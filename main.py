@@ -1,9 +1,14 @@
-import json
 import os
+import random
+import jsonlines
 import questionary
 from tqdm import tqdm
 from enum import Enum
 from colorama import Fore, Style
+
+
+def clear_terminal():
+    os.system("cls" if os.name == "nt" else "clear")
 
 
 class Answer(Enum):
@@ -33,14 +38,17 @@ class ExamSystem:
     def run():
         instance = ExamSystem()
         instance.check_dir_exists()
+        instance.read_data()
         instance.show_ui()
 
     def __init__(self):
         self.work_path = os.getcwd()
         self.storage_dir = os.path.join(self.work_path, "题库目录")
-        self.storage_path = os.path.join(self.storage_dir, "题库.json")
-        self.topic_reader_cache: list[Topic] = []
+        self.storage_path = os.path.join(self.storage_dir, "题库.jsonl")
+        self.topic_reader_cache = []
         self.topic_writer_cache: list[Topic] = []
+        self.wrong_answers = []
+        self.right_answer_count = 0
 
     def check_dir_exists(self):
         if not os.path.exists(self.storage_dir):
@@ -50,21 +58,26 @@ class ExamSystem:
             open(self.storage_path, "w", encoding="utf-8")
 
     def read_data(self):
-        with open(self.storage_path, "r", encoding="utf-8") as r:
-            self.topic_reader_cache = json.load(r)
+        with jsonlines.open(self.storage_path) as rows:
+            for row in rows:
+                self.topic_reader_cache.append(row)
 
     def write_data(self):
-        with open(self.storage_path, "+a", encoding="utf-8") as w:
+        with jsonlines.open(self.storage_path, mode="a") as w:
             for topic in tqdm(
                 self.topic_writer_cache, total=len(self.topic_writer_cache)
             ):
                 data = {
                     "题干": topic.title,
-                    "备选答案": {},# TODO add
+                    "备选答案": {
+                        "A": topic.options.options1,
+                        "B": topic.options.options2,
+                        "C": topic.options.options3,
+                        "D": topic.options.options4,
+                    },
                     "正确答案": topic.answer,
                 }
-                print(data)
-                json.dump(data, w)
+                w.write(data)
         print(Fore.RED + "录入成功!" + Style.RESET_ALL)
 
     def add_topic(self):
@@ -87,13 +100,75 @@ class ExamSystem:
         self.topic_writer_cache.append(topic)
         self.write_data()
 
-    def show_topic(self):
-        count = questionary.text("请输入题目数量: ").ask()
-        pass
+    def input_topic_count(self) -> int:
+        max_topic_length = len(self.topic_reader_cache)
+        try:
+            count = questionary.text(f"请输入题目数量(总题目数量{max_topic_length}): ").ask()
+            count = int(count)
+            if count > max_topic_length:
+                print(Fore.RED + "题目数量不足,请重新选择!" + Style.RESET_ALL)
+                return self.input_topic_count()
+            else:
+                return count
+        except:
+            print("题目数量应该是数字,请输入数字!")
+            return self.input_topic_count()
+
+    def show_exam(self):
+        selected_count = self.input_topic_count()
+        random.shuffle(self.topic_reader_cache)
+        for topic in self.topic_reader_cache[0:selected_count]:
+            clear_terminal()
+            print("题目:\t" + Fore.YELLOW + f"{topic['题干']}", Style.RESET_ALL)
+            selected_option: str = questionary.select(
+                "请选择你的答案(键盘上下方向键选择,按回车确定):",
+                [
+                    f"A、{topic['备选答案']['A']}",
+                    f"B、{topic['备选答案']['B']}",
+                    f"C、{topic['备选答案']['C']}",
+                    f"D、{topic['备选答案']['D']}",
+                ],
+            ).ask()
+
+            format_selected_option = selected_option.split("、")[0]
+            if format_selected_option == topic["正确答案"]:
+                self.right_answer_count += 1
+            else:
+                self.wrong_answers.append(
+                    {
+                        "题干": topic["题干"],
+                        "正确答案": f"{topic['正确答案']}、{topic['备选答案'][topic['正确答案']]}",
+                        "你的选项": selected_option,
+                    }
+                )
+
+            input("按任意键下一题")
+
+        self.show_final_panel()
+
+    def show_final_panel(self):
+        clear_terminal()
+        print(
+            "共答对" + Fore.GREEN + str(self.right_answer_count) + Style.RESET_ALL + "道题目"
+        )
+        if len(self.wrong_answers) > 0:
+            print(
+                "共答错"
+                + Fore.RED
+                + str(len(self.wrong_answers))
+                + Style.RESET_ALL
+                + "道题目"
+            )
+            input("按任意键查看错题")
+            for topic in self.wrong_answers:
+                print("题目:\t" + Fore.YELLOW + f"{topic['题干']}", Style.RESET_ALL)
+                print("正确答案: " + Fore.GREEN + f"{topic['正确答案']}", Style.RESET_ALL)
+                print("你的选项: " + Fore.RED + f"{topic['你的选项']}", Style.RESET_ALL)
+                print()
 
     def show_ui(self):
         menu_options: dict = {
-            "答题": self.show_topic,
+            "答题": self.show_exam,
             "试题录入": self.add_topic,
             "退出程序": exit,
         }
