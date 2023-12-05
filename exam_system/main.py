@@ -81,7 +81,6 @@ class ExamSystem:
         if data:
             for item in data:  # type: ignore
                 self.topic_reader_cache.append(json.loads(item))
-                print(item)
 
     def write_data(self):
         for item in self.topic_writer_cache:
