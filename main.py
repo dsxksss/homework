@@ -1,8 +1,8 @@
 import os
 import random
-import jsonlines
+import json
+import redis
 import questionary
-from tqdm import tqdm
 from enum import Enum
 from colorama import Fore, Style
 
@@ -32,52 +32,62 @@ class Topic:
         self.options = options
         self.answer = answer
 
+    def __dict__(self) -> dict:
+        return {
+            "题干": self.title,
+            "备选答案": {
+                "A": self.options.options1,
+                "B": self.options.options2,
+                "C": self.options.options3,
+                "D": self.options.options4,
+            },
+            "正确答案": self.answer,
+        }
+
 
 class ExamSystem:
     @staticmethod
     def run():
         instance = ExamSystem()
-        instance.check_dir_exists()
         instance.read_data()
         instance.show_ui()
 
     def __init__(self):
-        self.work_path = os.getcwd()
-        self.storage_dir = os.path.join(self.work_path, "题库目录")
-        self.storage_path = os.path.join(self.storage_dir, "题库.jsonl")
+        self.redis_host = "localhost"
+        self.redis_port = 6379
+        self.redis_db = 0
+        self.redis_key = "题库"
         self.topic_reader_cache = []
         self.topic_writer_cache: list[Topic] = []
         self.wrong_answers = []
         self.right_answer_count = 0
+        self.check_redis_connection()
 
-    def check_dir_exists(self):
-        if not os.path.exists(self.storage_dir):
-            os.mkdir(self.storage_dir)
-            open(self.storage_path, "w", encoding="utf-8")
-        elif not os.path.exists(self.storage_path):
-            open(self.storage_path, "w", encoding="utf-8")
+    def check_redis_connection(self):
+        try:
+            self.redis_client = redis.Redis(
+                host=self.redis_host,
+                port=self.redis_port,
+                db=self.redis_db,
+                decode_responses=True,
+            )
+            self.redis_client.ping()
+        except redis.ConnectionError:
+            print("无法连接到Redis数据库,请确保Redis已启动并正确配置连接信息。")
+            exit()
 
     def read_data(self):
-        with jsonlines.open(self.storage_path) as rows:
-            for row in rows:
-                self.topic_reader_cache.append(row)
+        data = self.redis_client.lrange(self.redis_key, 0, -1)
+        if data:
+            for item in data:  # type: ignore
+                self.topic_reader_cache.append(json.loads(item))
+                print(item)
 
     def write_data(self):
-        with jsonlines.open(self.storage_path, mode="a") as w:
-            for topic in tqdm(
-                self.topic_writer_cache, total=len(self.topic_writer_cache)
-            ):
-                data = {
-                    "题干": topic.title,
-                    "备选答案": {
-                        "A": topic.options.options1,
-                        "B": topic.options.options2,
-                        "C": topic.options.options3,
-                        "D": topic.options.options4,
-                    },
-                    "正确答案": topic.answer,
-                }
-                w.write(data)
+        for item in self.topic_writer_cache:
+            self.redis_client.rpush(
+                self.redis_key, json.dumps(item.__dict__(), ensure_ascii=False)
+            )
         print(Fore.RED + "录入成功!" + Style.RESET_ALL)
 
     def add_topic(self):
@@ -98,15 +108,23 @@ class ExamSystem:
         options = Options(option1, option2, option3, option4)
         topic = Topic(title=title, options=options, answer=answer)
         self.topic_writer_cache.append(topic)
-        self.write_data()
+
+        is_continue = questionary.confirm("是否继续添加题目").ask()
+        if is_continue:
+            self.add_topic()
+        else:
+            self.write_data()
 
     def input_topic_count(self) -> int:
         max_topic_length = len(self.topic_reader_cache)
+        if max_topic_length <= 0:
+            print(Fore.RED + "题目数量不足足,请添加题目后重新选择!" + Style.RESET_ALL)
+            exit(0)
         try:
             count = questionary.text(f"请输入题目数量(总题目数量{max_topic_length}): ").ask()
             count = int(count)
             if count > max_topic_length:
-                print(Fore.RED + "题目数量不足,请重新选择!" + Style.RESET_ALL)
+                print(Fore.RED + "题目数量不足足,请重新选择!" + Style.RESET_ALL)
                 return self.input_topic_count()
             else:
                 return count
@@ -163,7 +181,7 @@ class ExamSystem:
             for topic in self.wrong_answers:
                 print("题目:\t" + Fore.YELLOW + f"{topic['题干']}", Style.RESET_ALL)
                 print("正确答案: " + Fore.GREEN + f"{topic['正确答案']}", Style.RESET_ALL)
-                print("你的选项: " + Fore.RED + f"{topic['你的选项']}", Style.RESET_ALL)
+                print("你的选项: " + Fore.RED + f"{topic['你的选选项']}", Style.RESET_ALL)
                 print()
 
     def show_ui(self):
