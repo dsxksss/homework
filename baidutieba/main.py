@@ -1,40 +1,47 @@
 import csv
 import time
-import requests
 import os
-from bs4 import BeautifulSoup
 import re
 from lxml import html
+from bs4 import BeautifulSoup
+from selenium import webdriver
 from fake_useragent import UserAgent
+from selenium.webdriver.chrome.options import Options
 
 
-class Movie:
+class Post:
     def __init__(
         self,
-        orderNumber: str,
         title: str,
-        info: str,
-        score: str,
+        author: str,
+        comment_num: str,
+        date: str,
     ) -> None:
-        self.排名序号 = orderNumber
-        self.电影名称 = title
-        self.电影基本信息 = info
-        self.评分 = score
+        self.贴子标题 = title
+        self.发帖人 = author
+        self.评论数量 = comment_num
+        self.最后回复时间 = date
 
 
-class BaseDouban:
-    def __init__(self, name: str) -> None:
+class BaseTeiba:
+    def __init__(self, name: str, count: int) -> None:
         self.urls = [
-            f"https://movie.douban.com/top250?start={i}&filter="
-            for i in range(0, 100, 25)
+            f"https://tieba.baidu.com/f?kw=python&ie=utf-8&pn={i}"
+            for i in range(0, 50 * count, 50)
         ]
         self.headers = {"User-Agent": UserAgent().random}
-        self.csv_headers = ["排名序号", "电影名称", "电影基本信息", "评分"]
+        self.csv_headers = ["贴子标题", "发帖人", "评论数量", "最后回复时间"]
         self.work_path = os.getcwd()
-        self.storage_dir = os.path.join(self.work_path, "豆瓣前100电影")
-        self.storage_path = os.path.join(self.storage_dir, f"使用{name}爬取.csv")
-        self.movies: list[Movie] = []
+        self.storage_dir = os.path.join(self.work_path, "百度贴吧爬虫内容")
+        self.storage_path = os.path.join(self.storage_dir, f"{name}爬取.csv")
+        self.posts: list[Post] = []
         self.check_dir_exists()
+
+    def run(self):
+        pass
+
+    def get_one_page(self):
+        pass
 
     def check_dir_exists(self):
         if not os.path.exists(self.storage_dir):
@@ -47,157 +54,192 @@ class BaseDouban:
         # 生成爬取后的文件
         with open(self.storage_path, "w", newline="", encoding="utf-8") as w:
             writer = csv.DictWriter(w, fieldnames=self.csv_headers)
-            writer.writeheader()  # 写入csv头
-            writer.writerows(self.movies)  # 写入全部电影数据
-
-    def run(self):
-        pass
-
-    def get_one_page(self):
-        pass
+            writer.writeheader()
+            writer.writerows(self.posts)
 
 
-class XpathDouban(BaseDouban):
-    def __init__(self, name: str) -> None:
-        super().__init__(name)
+class Xpath(BaseTeiba):
+    def __init__(self, name: str, count: int) -> None:
+        super().__init__(name, count)
+        self.chrome_options = Options()
+        self.chrome_options.add_argument("blink-settings=imagesEnabled=false")  # 不显示图片
+        self.chrome_options.add_argument("--log-level=3")
+        self.chrome_options.add_argument("--ignore-certificate-errors")
+        self.driver = webdriver.Chrome(options=self.chrome_options)
 
     def run(self):
         for url in self.urls:
             self.get_one_page(url)
         self.storage_csv()
-        print("---------------\033[32m爬取完成\033[0m---------------")
-        print("使用lxml库xpath方法爬取完成")
+        print("xpath爬取完成")
 
     def get_one_page(self, url):
-        page_content = requests.get(url, headers=self.headers).text
+        self.driver.get(url)
+        time.sleep(2)  # 等待页面加载完成
+
+        page_content = self.driver.page_source
         page_etree = html.etree.HTML(page_content)
-        orderNumbers: list[str] = page_etree.xpath(
-            '//*[@id="content"]/div/div[1]/ol/li/div/div[1]/em/text()'
+
+        titles = page_etree.xpath(
+            '//*[@id="thread_list"]/li/div/div[2]/div[1]/div[1]/a/text()'
         )
 
-        titles: list[str] = page_etree.xpath(
-            '//*[@id="content"]/div/div[1]/ol/li/div/div[2]/div[1]/a/span[1]/text()'
+        authors = page_etree.xpath(
+            '//*[@id="thread_list"]/li/div/div[2]/div[1]/div[2]/span[1]/span[1]/a/text()'
         )
 
-        infos: list[str] = page_etree.xpath(
-            '//*[@id="content"]/div/div[1]/ol/li/div/div[2]/div[2]/p[1]/text()'
-        )
-        infos = [info.strip() for info in infos]
-
-        scores: list[str] = page_etree.xpath(
-            '//*[@id="content"]/div/div[1]/ol/li/div/div[2]/div[2]/div/span[2]/text()'
+        comment_nums = page_etree.xpath(
+            '//*[@id="thread_list"]/li/div/div[1]/span/text()'
         )
 
-        for i in range(len(orderNumbers)):
-            movie = Movie(
-                orderNumber=orderNumbers[i],
+        dates = page_etree.xpath(
+            '//*[@id="thread_list"]/li/div/div[2]/div[2]/div[2]/span[2]/text()'
+        )
+        dates = [date.strip() for date in dates]
+
+        # 避免获取信息时发生遗漏问题，根据获取到的最小长度来导入
+        lengths = [len(titles), len(authors), len(comment_nums), len(dates)]
+
+        for i in range(min(lengths)):
+            post = Post(
                 title=titles[i],
-                info=infos[i],
-                score=scores[i],
+                author=authors[i],
+                comment_num=comment_nums[i],
+                date=dates[i],
             )
-            self.movies.append(movie.__dict__)
+            self.posts.append(post.__dict__)
 
 
-class SelectDouban(BaseDouban):
-    def __init__(self, name: str) -> None:
-        super().__init__(name)
+class Selector(BaseTeiba):
+    def __init__(self, name: str, count: int) -> None:
+        super().__init__(name, count)
+        self.chrome_options = Options()
+        self.chrome_options.add_argument("blink-settings=imagesEnabled=false")  # 不显示图片
+        self.chrome_options.add_argument("--log-level=3")
+        self.chrome_options.add_argument("--ignore-certificate-errors")
+        self.driver = webdriver.Chrome(options=self.chrome_options)
 
     def run(self):
         for url in self.urls:
             self.get_one_page(url)
         self.storage_csv()
-        print("---------------\033[32m爬取完成\033[0m---------------")
-        print("使用bs4库CSS选择器方法爬取完成")
+        print("CSS选择器爬取完成")
 
     def get_one_page(self, url):
-        page_content = requests.get(url, headers=self.headers).text
+        self.driver.get(url)
+        time.sleep(2)  # 等待页面加载完成
+
+        page_content = self.driver.page_source
         page_soup = BeautifulSoup(page_content, "html.parser")
 
-        orderNumbers: list[str] = [e.get_text() for e in page_soup.select("li em")]
-
-        titles: list[str] = [
-            e.get_text() for e in page_soup.select("li .title:nth-child(1)")
-        ]
-        infos: list[str] = [
-            e.get_text().strip() for e in page_soup.select("li p:nth-child(1)")
+        titles = [
+            e.get_text()
+            for e in page_soup.select(".j_thread_list .threadlist_title > .j_th_tit")
         ]
 
-        scores: list[str] = [
-            e.get_text().strip() for e in page_soup.select("li .rating_num")
-        ]
-
-        for i in range(len(orderNumbers)):
-            movie = Movie(
-                orderNumber=orderNumbers[i],
-                title=titles[i],
-                info=infos[i],
-                score=scores[i],
+        authors = [
+            e.get_text()
+            for e in page_soup.select(
+                ".j_thread_list .col2_right:nth-child(2) > .threadlist_lz .frs-author-name"
             )
-            self.movies.append(movie.__dict__)
+        ]
+
+        comment_nums = [
+            e.get_text()
+            for e in page_soup.select(
+                ".j_thread_list .col2_left:nth-child(1) > .threadlist_rep_num"
+            )
+        ]
+
+        dates = [
+            e.get_text().strip()
+            for e in page_soup.select(
+                "#thread_list > li > div > div.col2_right.j_threadlist_li_right > div.threadlist_detail.clearfix > div.threadlist_author.pull_right > span.threadlist_reply_date.pull_right.j_reply_data"
+            )
+        ]
+
+        # 避免获取信息时发生遗漏问题，根据获取到的最小长度来导入
+        lengths = [len(titles), len(authors), len(comment_nums), len(dates)]
+
+        for i in range(min(lengths)):
+            post = Post(
+                title=titles[i],
+                author=authors[i],
+                comment_num=comment_nums[i],
+                date=dates[i],
+            )
+            self.posts.append(post.__dict__)
+
+    def __del__(self):
+        self.driver.quit()
 
 
-class RegularDouban(BaseDouban):
-    def __init__(self, name: str) -> None:
-        super().__init__(name)
+class Regular(BaseTeiba):
+    def __init__(self, name: str, count: int) -> None:
+        super().__init__(name, count)
+        self.chrome_options = Options()
+        self.chrome_options.add_argument("blink-settings=imagesEnabled=false")  # 不显示图片
+        self.chrome_options.add_argument("--log-level=3")
+        self.chrome_options.add_argument("--ignore-certificate-errors")
+        self.driver = webdriver.Chrome(options=self.chrome_options)
 
     def run(self):
         for url in self.urls:
             self.get_one_page(url)
         self.storage_csv()
-        print("---------------\033[32m爬取完成\033[0m---------------")
-        print("使用re库正则表达式爬取完成")
+        print("正则表达式爬取完成")
 
     def get_one_page(self, url):
-        page_content = requests.get(url, headers=self.headers).text
-        orderNumbers = re.findall(r'<em class="">(\d+)</em>', page_content)
-        titles = re.findall(r'<span class="title">([^&]+)</span>', page_content)
-        infos = re.findall(
-            r'<div class="bd">\s*<p class="">\s*(.*?)\s*s*<br>\s*(.*?)\s*</p>',
-            page_content,
-        )
-        scores = re.findall(
-            r'<span class="rating_num" property="v:average">(\d.+)</span',
-            page_content,
-        )
+        self.driver.get(url)
+        time.sleep(2)  # 等待页面加载完成
 
-        for i in range(len(orderNumbers)):
-            movie = Movie(
-                orderNumber=orderNumbers[i],
+        page_content = self.driver.page_source
+        titles = re.findall(
+            r'target="_blank" class="j_th_tit ">(.*?)</a>', page_content
+        )
+        titles = [title.strip() for title in titles]
+        authors = re.findall(
+            r'class="frs-author-name j_user_card ".*?target="_blank">(.*?)</a></span>',
+            page_content,
+        )
+        authors = [author.strip() for author in authors]
+        comment_nums = re.findall(r'title="回复">(\d.*?)</span>', page_content)
+        dates = re.findall(
+            r'title="最后回复时间">\s\s(.*?)</span>',
+            page_content,
+        )
+        dates = [date.strip() for date in dates]
+
+        # 避免获取信息时发生遗漏问题，根据获取到的最小长度来导入
+        lengths = [len(titles), len(authors), len(comment_nums), len(dates)]
+
+        for i in range(min(lengths)):
+            post = Post(
                 title=titles[i],
-                info=infos[i][0].replace("&nbsp;", ""),
-                score=scores[i],
+                author=authors[i],
+                comment_num=comment_nums[i],
+                date=dates[i],
             )
-            self.movies.append(movie.__dict__)
+            self.posts.append(post.__dict__)
+
+    def __del__(self):
+        self.driver.quit()
 
 
 def main():
-    xpathDouban = XpathDouban("xpath")
-    regularDouban = RegularDouban("正则表达式")
-    selectDouban = SelectDouban("css选择器")
+    print("欢迎使用Python吧爬虫程序")
+    count = int(input("请输入你要爬取的页数1-20(数值如果超过则为20页,少于规定值则1页):"))
+    count = max(1, min(20, count))
+    print(count)
+    Xpath("Xpath", count).run()
+    Selector("CSS选择器", count).run()
+    Regular("正则表达式", count).run()
 
-    print("豆瓣前100电影爬虫系统菜单:")
-    print("1. 使用lxml库xpath方法爬取")
-    print("2. 使用bs4库CSS选择器方法爬取")
-    print("3. 使用re库正则表达式爬取")
-    print("4. 退出程序")
-    choice = input("请选择一个选项: ")
-    start_time = time.time()  # 记录程序开始运行时间
-    if choice == "1":
-        xpathDouban.run()
-    elif choice == "2":
-        selectDouban.run()
-    elif choice == "3":
-        regularDouban.run()
-    elif choice == "4":
-        pass
-
-    end_time = time.time()  # 记录程序结束运行时间
-    print("运行耗时 %.2f 秒" % (end_time - start_time))
+    print("\033[32m内容全部爬取完成\033[0m")
 
 
-# 结束提示信息
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"程序崩溃,发生异常:{e}")
+        print(f"异常:{e}")
