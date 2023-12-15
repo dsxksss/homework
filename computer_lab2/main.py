@@ -59,7 +59,9 @@ class Database:
 class Menu:
     def __init__(self):
         self.db = Database()
-        self.rate = 0.5
+
+        # 收费标准设置
+        self.rate = 0.1
 
     def display_menu(self):
         print("*" * 26)
@@ -128,33 +130,33 @@ class Menu:
             print("1. 班级")
             print("2. 学号")
             print("3. 姓名")
-            print("4. 查询全部")
-            print("5. 完成查询")
+            print("4. 完成查询")
             choice = input("请输入选项：")
             if choice == "1":
                 class_name = input("请输入班级：")
                 query_dict["class_name"] = class_name
-                break
             elif choice == "2":
                 student_id = input("请输入学号：")
                 query_dict["student_id"] = student_id
-                break
             elif choice == "3":
                 name = input("请输入姓名：")
                 query_dict["name"] = name
-                break
             elif choice == "4":
-                pass
-            elif choice == "5":
                 break
             else:
                 print("无效选项！")
         for student in self.db.search_student(query_dict):
-            print("*" * 40)
+            print("-" * 40)
             print(
-                f"学号：{student.student_id}\n班级：{student.class_name}\n姓名：{student.name}\n开始上机时间：{student.start_time}\n结束上机时间：{student.end_time}\n上机费用：{student.charge}元"
+f"""学号：{student.student_id}
+班级：{student.class_name}
+姓名：{student.name}
+开始上机时间：{student.start_time}
+结束上机时间：{student.end_time}
+上机费用：%.2f元"""
+% (student.charge)
             )
-            print("*" * 40)
+            print("-" * 40)
 
     def run(self):
         while True:
