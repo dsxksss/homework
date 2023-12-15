@@ -180,7 +180,7 @@ class ExamSystem:
             for topic in self.wrong_answers:
                 print("题目:\t" + Fore.YELLOW + f"{topic['题干']}", Style.RESET_ALL)
                 print("正确答案: " + Fore.GREEN + f"{topic['正确答案']}", Style.RESET_ALL)
-                print("你的选项: " + Fore.RED + f"{topic['你的选选项']}", Style.RESET_ALL)
+                print("你的选项: " + Fore.RED + f"{topic['你的选项']}", Style.RESET_ALL)
                 print()
 
     def show_ui(self):
